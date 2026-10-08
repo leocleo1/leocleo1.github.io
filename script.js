@@ -2,7 +2,7 @@
 
 const $ = (id) => document.getElementById(id);
 
-$("loginForm"),addEventListener("submit", (event) => {
+$("loginForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const name = $("nameIn").value.trim();
     console.log("Login von: ",name);
