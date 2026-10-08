@@ -388,3 +388,38 @@ tr.live td { color: var(--ok); font-weight: 600; }
     background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
     padding: 10px 12px; min-height: 44px;
 }
+
+/* ---------- Tätigkeits-Statistik ---------- */
+.stat-row {
+    display: grid; grid-template-columns: minmax(110px, 200px) minmax(0, 1fr) auto;
+    gap: 12px; align-items: center;
+    padding: 8px 0; border-top: 1px solid var(--line);
+}
+.stat-row:first-child { border-top: 0; padding-top: 0; }
+.stat-label { font-weight: 600; overflow-wrap: anywhere; }
+.stat-row .bar { height: 14px; margin-top: 0; }
+.stat-time { font-size: 14px; white-space: nowrap; text-align: right; }
+
+@media (max-width: 760px) {
+    .stat-row { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; }
+    .stat-label { grid-column: 1 / -1; }
+}
+
+/* ---------- Casino ---------- */
+.reels { display: flex; justify-content: center; gap: 12px; }
+.reel {
+    width: clamp(72px, 22vw, 110px); aspect-ratio: 1;
+    display: grid; place-items: center;
+    font-size: clamp(36px, 11vw, 58px);
+    background: var(--bg); border: 2px solid var(--line); border-radius: 14px;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+.reel.spinning { border-color: var(--accent); }
+.slot-msg { text-align: center; font-weight: 600; min-height: 1.5em; }
+.bets { display: flex; flex-wrap: wrap; gap: 8px; }
+.bets .btn.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.pay-row {
+    display: flex; justify-content: space-between; gap: 12px;
+    padding: 8px 0; border-top: 1px solid var(--line);
+}
+.pay-row:first-child { border-top: 0; padding-top: 0; }

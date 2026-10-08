@@ -46,6 +46,38 @@ const TAB_KEY = "twitchkiste-tab";
 const MONTHS = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli",
     "August", "September", "Oktober", "November", "Dezember"];
 
+/* Wer den Casino-Tab sieht. Eintrag = ID des Namens (kleingeschrieben, ohne Umlaute, Leerzeichen -> "-"). */
+const SLOT_USERS = ["lip","leo"];
+const SLOT_START = 100;        // Startguthaben in Coins
+const COINS_PER_MIN = 1;       // Coins pro gearbeiteter Minute
+const SLOT_BETS = [5, 10, 25, 50, 100];
+
+/* weight = Häufigkeit, pay = Gewinn-Multiplikator bei drei gleichen Symbolen */
+const SLOT_SYMBOLS = [
+    { sym: "🎬", weight: 30, pay: 5 },
+    { sym: "📱", weight: 25, pay: 8 },
+    { sym: "🎮", weight: 20, pay: 12 },
+    { sym: "⭐", weight: 14, pay: 20 },
+    { sym: "💎", weight: 8, pay: 50 },
+    { sym: "7️⃣", weight: 3, pay: 100 }
+];
+const JACKPOT_SYM = "7️⃣";
+
+const JACKPOT_PRIZES = [
+    "Einen Tag lang bestimmt Lip, welche Clips geschnitten werden",
+    "Der Chef holt Kaffee",
+    "Ein Meeting nach Wahl darf abgesagt werden",
+    "Eine Stunde Arbeitszeitbetrug ohne Konsequenzen",
+    "Der nächste Clip-Titel wird von Lip diktiert"
+];
+
+const LOSE_TEXTS = [
+    "Leider nichts. Das Haus gewinnt immer.",
+    "Knapp daneben ist auch vorbei.",
+    "Nichts. Aber der nächste Dreh ist bestimmt der Richtige.",
+    "Die Walzen schweigen."
+];
+
 /* ---------- Zustand ---------- */
 const state = {
     employees: {},
@@ -296,6 +328,10 @@ const Store = {
     getEmployee(key) { return db.ref("employees/" + key).get().then((snap) => snap.val()); },
     createEmployee(key, employee) { return db.ref("employees/" + key).set(employee); },
     updateEmployee(key, fields) { return db.ref("employees/" + key).update(fields); },
+    /* Gewinn oder Verlust sicher draufrechnen (Transaction verhindert Überschreiben) */
+    addSlotNet(key, delta) {
+        return db.ref("employees/" + key + "/slotNet").transaction((v) => (v || 0) + delta);
+    },
 
     /* Schichten */
     startShift(shift) { return db.ref("shifts/" + shift.id).set(shift); },
@@ -470,6 +506,54 @@ function renderRanking() {
     } else {
         note.textContent = "";
     }
+    renderTaskStats();
+}
+
+function renderTaskStats() {
+    const range = $("rankRange").value;
+    const from = range === "week" ? weekStart() : range === "month" ? monthStart() : 0;
+    const mineOnly = $("statScope").value === "me";
+    const now = Date.now();
+
+    /* Alle bekannten Tätigkeiten starten bei 0, damit die Liste stabil bleibt */
+    const totals = {};
+    for (const t of TASKS) totals[t] = 0;
+
+    for (const s of state.shifts) {
+        if (mineOnly && s.emp !== state.meKey) continue;
+        const end = s.end || now;
+        if (end <= from) continue;
+        const share = s.start >= from ? 1 : (end - from) / ((end - s.start) || 1);
+        const task = s.task || "Ohne Tätigkeit";
+        totals[task] = (totals[task] || 0) + workMs(s, now) * share;
+    }
+
+    const rows = Object.keys(totals)
+        .map((t) => ({ task: t, ms: totals[t] }))
+        .sort((a, b) => b.ms - a.ms);
+    const sum = rows.reduce((a, r) => a + r.ms, 0);
+    const max = Math.max(rows[0].ms, 1);
+
+    const box = $("statList");
+    box.replaceChildren();
+
+    for (const r of rows) {
+        const row = el("div", "stat-row");
+        row.append(el("span", "stat-label", r.task));
+
+        const bar = el("div", "bar");
+        const fill = el("span");
+        fill.style.width = Math.round((r.ms / max) * 100) + "%";
+        bar.append(fill);
+
+        const pct = sum ? Math.round((r.ms / sum) * 100) : 0;
+        row.append(bar, el("span", "stat-time mono", fmtHM(r.ms) + " · " + pct + " %"));
+        box.append(row);
+    }
+
+    $("statNote").textContent = sum
+        ? "Die meiste Zeit ging für „" + rows[0].task + "“ drauf. Pausen zählen nicht mit."
+        : "Im gewählten Zeitraum wurde noch nichts gearbeitet.";
 }
 
 tabHooks.ranking = renderRanking;
@@ -526,10 +610,13 @@ function updateTimes() {
     $("payWeek").textContent = weekText;
 
     if (state.tab === "ranking") renderRanking();
+    if (state.tab === "slots") renderSlots();
 }
 
 /* ---------- Aktionen ---------- */
 function showTab(name) {
+    if (name === "slots" && !canSlot()) name = "home";
+    state.tab = name;
     state.tab = name;
     lsSet(TAB_KEY, name);
     document.querySelectorAll("[data-view]").forEach((v) => { v.hidden = v.dataset.view !== name; });
@@ -968,6 +1055,159 @@ async function clearChat() {
 tabHooks.chat = scrollChat;
 extraRenderers.push(renderChat);
 
+/* ---------- Casino ---------- */
+const casino = { bet: 10, spinning: false, log: [] };
+const SLOT_TOTAL = SLOT_SYMBOLS.reduce((a, s) => a + s.weight, 0);
+
+const canSlot = () => SLOT_USERS.includes(state.meKey);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/* Kontostand = Start + Arbeitszeit-Coins + Gewinn/Verlust aus der Datenbank */
+function slotBalance() {
+    const me = state.employees[state.meKey] || {};
+    const earned = Math.floor(sumMs(state.meKey, 0) / 60000 * COINS_PER_MIN);
+    return SLOT_START + earned + (me.slotNet || 0);
+}
+
+function pickSymbol() {
+    let r = Math.random() * SLOT_TOTAL;
+    for (const s of SLOT_SYMBOLS) {
+        r -= s.weight;
+        if (r < 0) return s;
+    }
+    return SLOT_SYMBOLS[0];
+}
+
+const randomSym = () => SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)].sym;
+
+function evalSpin(result, bet) {
+    const [a, b, c] = result.map((r) => r.sym);
+    if (a === b && b === c) return { win: bet * result[0].pay, kind: "triple", sym: a };
+    if (a === b || b === c || a === c) return { win: bet, kind: "pair" };
+    return { win: 0, kind: "none" };
+}
+
+/* Baut Einsatz-Buttons und Gewinntabelle einmalig auf */
+function buildCasinoUi() {
+    const box = $("betBox");
+    for (const value of SLOT_BETS) {
+        const b = el("button", "btn btn-small", String(value));
+        b.type = "button";
+        b.dataset.bet = String(value);
+        b.addEventListener("click", () => {
+            if (casino.spinning) return;
+            casino.bet = value;
+            renderSlots();
+        });
+        box.append(b);
+    }
+
+    const table = $("payTable");
+    for (const s of SLOT_SYMBOLS) {
+        const row = el("div", "pay-row");
+        row.append(el("span", "", s.sym + " " + s.sym + " " + s.sym), el("strong", "mono", "× " + s.pay));
+        table.append(row);
+    }
+    const pair = el("div", "pay-row");
+    pair.append(el("span", "", "Zwei gleiche"), el("strong", "", "Einsatz zurück"));
+    table.append(pair);
+}
+
+function renderSlots() {
+    const tab = document.querySelector('[data-tab="slots"]');
+    const allowed = canSlot();
+    tab.hidden = !allowed;
+    if (!allowed || casino.spinning) return;
+
+    const balance = slotBalance();
+    $("slotBalance").textContent = balance + " Coins";
+
+    document.querySelectorAll("#betBox button").forEach((b) => {
+        const value = Number(b.dataset.bet);
+        b.classList.toggle("active", value === casino.bet);
+        b.disabled = value > balance;
+    });
+    $("spinBtn").disabled = balance < casino.bet;
+
+    const log = $("casinoLog");
+    log.replaceChildren();
+    $("casinoEmpty").hidden = casino.log.length > 0;
+    for (const entry of casino.log) {
+        const li = el("li", "pay-row");
+        const sign = entry.delta > 0 ? "+" : entry.delta < 0 ? "−" : "±";
+        li.append(el("span", "", entry.reels), el("strong", "mono", sign + Math.abs(entry.delta)));
+        log.append(li);
+    }
+}
+
+async function spin() {
+    if (casino.spinning || !canSlot()) return;
+
+    const bet = casino.bet;
+    if (slotBalance() < bet) {
+        toast("Nicht genug Coins. Geh arbeiten.", true);
+        return;
+    }
+
+    /* Ergebnis steht sofort fest und wird sofort verbucht, danach läuft nur noch die Animation.
+       So bringt auch Neuladen mitten im Dreh nichts. */
+    const result = [pickSymbol(), pickSymbol(), pickSymbol()];
+    const outcome = evalSpin(result, bet);
+    const delta = outcome.win - bet;
+
+    casino.spinning = true;
+    $("spinBtn").disabled = true;
+    $("slotMsg").textContent = "Die Walzen drehen sich …";
+
+    try {
+        await Store.addSlotNet(state.meKey, delta);
+    } catch (e) {
+        casino.spinning = false;
+        renderSlots();
+        toast("Dreh hat nicht geklappt.", true);
+        return;
+    }
+
+    const reels = document.querySelectorAll("#reels .reel");
+    const stopped = [false, false, false];
+    reels.forEach((r) => r.classList.add("spinning"));
+    const timer = setInterval(() => {
+        reels.forEach((r, i) => { if (!stopped[i]) r.textContent = randomSym(); });
+    }, 80);
+
+    for (let i = 0; i < 3; i++) {
+        await sleep(i === 0 ? 900 : 600);
+        stopped[i] = true;
+        reels[i].textContent = result[i].sym;
+        reels[i].classList.remove("spinning");
+    }
+    clearInterval(timer);
+
+    let message;
+    if (outcome.kind === "triple" && outcome.sym === JACKPOT_SYM) {
+        const prize = JACKPOT_PRIZES[Math.floor(Math.random() * JACKPOT_PRIZES.length)];
+        message = "JACKPOT! +" + outcome.win + " Coins und: " + prize;
+        Store.sendChat({
+            emp: state.meKey, name: state.meName, ts: Date.now(),
+            text: "🎰 JACKPOT! " + state.meName + " hat dreimal die 7 gedreht und gewinnt: " + prize
+        }).catch(() => {});
+    } else if (outcome.kind === "triple") {
+        message = "Dreimal " + outcome.sym + "! +" + outcome.win + " Coins";
+    } else if (outcome.kind === "pair") {
+        message = "Zwei gleiche. Einsatz zurück.";
+    } else {
+        message = LOSE_TEXTS[Math.floor(Math.random() * LOSE_TEXTS.length)];
+    }
+
+    $("slotMsg").textContent = message;
+    casino.log.unshift({ reels: result.map((r) => r.sym).join(" "), delta: delta });
+    casino.log = casino.log.slice(0, 8);
+    casino.spinning = false;
+    renderSlots();
+}
+
+extraRenderers.push(renderSlots);
+
 /* ---------- Start ---------- */
 async function init() {
     for (const task of TASKS) {
@@ -1005,6 +1245,9 @@ async function init() {
     });
     $("chatForm").addEventListener("submit", sendChat);
     $("chatClear").addEventListener("click", clearChat);
+    $("statScope").addEventListener("change", renderTaskStats);
+    buildCasinoUi();
+    $("spinBtn").addEventListener("click", spin);
 
     Store.listeners.push((d) => {
         state.employees = d.employees;

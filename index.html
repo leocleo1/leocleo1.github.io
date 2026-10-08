@@ -87,6 +87,7 @@
         <button class="tab" type="button" data-tab="vacation">Urlaub</button>
         <button class="tab" type="button" data-tab="chat">Chat</button>
         <button class="tab" type="button" data-tab="profile">Profil</button>
+        <button class="tab" type="button" data-tab="slots" hidden>🎰 Casino</button>
     </nav>
 
     <div class="view" data-view="home">
@@ -172,6 +173,20 @@
             </div>
             <ol class="rank" id="rankList"></ol>
             <p class="hint" id="rankNote"></p>
+        </section>
+        <section class="card" aria-label="Statistik pro Tätigkeit">
+            <div class="card-head">
+                <h2>Zeit pro Tätigkeit</h2>
+                <div class="field range">
+                    <label class="sr-only" for="statScope">Wessen Zeit</label>
+                    <select id="statScope">
+                        <option value="all">Ganzes Team</option>
+                        <option value="me">Nur ich</option>
+                    </select>
+                </div>
+            </div>
+            <div class="stats" id="statList"></div>
+            <p class="hint" id="statNote"></p>
         </section>
     </div>
 
@@ -287,6 +302,40 @@
                 <button class="btn btn-primary" type="submit">Senden</button>
             </form>
             <p class="hint">Der Chat zeigt die letzten 100 Nachrichten. Nichts Privates schreiben, die Datenbank ist offen.</p>
+        </section>
+    </div>
+    <div class="view" data-view="slots" hidden>
+        <section class="card" aria-label="Slotmaschine">
+            <div class="card-head">
+                <h2>🎰 Slotmaschine</h2>
+                <span class="chip on" id="slotBalance">0 Coins</span>
+            </div>
+
+            <div class="reels" id="reels">
+                <span class="reel">🎬</span>
+                <span class="reel">📱</span>
+                <span class="reel">🎮</span>
+            </div>
+            <p class="slot-msg" id="slotMsg" role="status">Einsatz wählen und drehen.</p>
+
+            <div class="field">
+                <span class="kpi-label">Einsatz (Coins)</span>
+                <div class="bets" id="betBox"></div>
+            </div>
+
+            <button class="stamp-btn" id="spinBtn" type="button">Drehen</button>
+            <p class="hint">Coins gibt es fürs Arbeiten: 1 Coin pro Minute Arbeitszeit, dazu 100 Startguthaben.</p>
+        </section>
+
+        <section class="card" aria-label="Gewinntabelle">
+            <h2>Gewinntabelle</h2>
+            <div id="payTable"></div>
+        </section>
+
+        <section class="card" aria-label="Letzte Drehs">
+            <h2>Letzte Drehs</h2>
+            <ul class="team" id="casinoLog"></ul>
+            <p class="empty" id="casinoEmpty">Noch nicht gedreht.</p>
         </section>
     </div>
 </main>
