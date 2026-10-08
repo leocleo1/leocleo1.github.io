@@ -1,50 +1,147 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="de">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Twitchkiste Zeiterfassung</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <main id="loginView">
-        <form id="loginForm">
-            <h1>Twitchkiste</h1>
+
+<header class="topbar">
+    <div class="topbar-inner">
+        <div class="brand">
+            <span class="logo" aria-hidden="true">T</span>
+            <span class="brand-text">Twitchkiste <span class="brand-sub">Zeiterfassung</span></span>
+        </div>
+        <div class="user" id="userBox" hidden>
+            <span class="avatar" id="userAvatar" aria-hidden="true"></span>
+            <span class="user-name" id="userName"></span>
+            <button class="btn btn-small" id="logoutBtn" type="button">Abmelden</button>
+        </div>
+    </div>
+</header>
+
+<!-- ============ LOGIN ============ -->
+<main class="auth" id="loginView">
+    <div class="auth-card">
+        <aside class="auth-side">
+            <h1>Zeiterfassung für Creator mit Verantwortung.</h1>
+            <p>Clips schneiden, Streams sichten, auf Inspiration warten. Alles sauber dokumentiert.</p>
+            <ul>
+                <li>Ein- und Ausstempeln mit einem Klick</li>
+                <li>Live-Teamstatus</li>
+                <li>Lohnzettel in Reichweite</li>
+            </ul>
+        </aside>
+
+        <form class="auth-form" id="loginForm">
             <h2>Mitarbeiter-Login</h2>
 
-            <label for="nameIn">Name</label>
-            <input id="nameIn" type="text" required>
+            <div class="field">
+                <label for="nameIn">Name</label>
+                <input id="nameIn" type="text" maxlength="24" autocomplete="off" required placeholder="Dein Name">
+            </div>
+            <div class="field">
+                <label for="pinIn">Passwort</label>
+                <input id="pinIn" type="password" maxlength="40" autocomplete="off" required placeholder="Kein echtes Passwort verwenden">
+            </div>
 
-            <label for="pinIN">Passwort</label>
-            <input id="pinIN" type="password" required>
+            <button class="btn btn-primary" id="loginBtn" type="submit">Anmelden</button>
+            <p class="form-error" id="loginErr" role="alert" hidden></p>
 
-            <button type="submit">Login</button>
+            <p class="hint">Neu hier? Name und Passwort eingeben, dein Account wird automatisch angelegt. Die Probezeit ist unbegrenzt.</p>
+            <p class="hint"><button class="link" id="forgotBtn" type="button">Passwort vergessen?</button></p>
+            <p class="hint" id="forgotTxt" hidden>Kein Problem. Wir schicken dir eine Mail an eine Adresse, die es nicht gibt. Bis die ankommt, melde dich einfach mit einem neuen Namen an. Dann bist du halt der Praktikant.</p>
         </form>
-    </main>
+    </div>
+</main>
 
-    <main id="appView" hidden>
-        <h1 id="hello"></h1>
-        <div id="timer">00:00:00</div>
+<!-- ============ DASHBOARD ============ -->
+<main class="app" id="appView" hidden>
 
-        <label for="taskSel">Tätigkeit</label>
-        <select id="taskSel">
-            <option>Clips schneiden</option>
-            <option>Twitch Stream sichten</option>
-            <option>TikTok hochladen</option>
-            <option>Auf Inspiration warten</option>
-            <option>Goonen</option>
-            <option>Arbeitszeitbetrug</option>
-        </select>
+    <div class="page-head">
+        <div>
+            <h1 id="hello">Guten Tag</h1>
+            <p class="muted" id="dateLine"></p>
+        </div>
+        <span class="chip" id="statusChip">Nicht eingestempelt</span>
+    </div>
 
-        <button id="stampBtn" type="button">Einstempeln</button>
+    <section class="kpis" aria-label="Kennzahlen">
+        <div class="kpi">
+            <span class="kpi-label">Heute</span>
+            <span class="kpi-value" id="today">0 Std 00 Min</span>
+        </div>
+        <div class="kpi">
+            <span class="kpi-label">Diese Woche</span>
+            <span class="kpi-value" id="week">0 Std 00 Min</span>
+        </div>
+        <div class="kpi">
+            <span class="kpi-label">Im Büro</span>
+            <span class="kpi-value" id="teamCount">0 von 0</span>
+        </div>
+        <div class="kpi">
+            <span class="kpi-label">Stundensatz</span>
+            <span class="kpi-value">Reichweite</span>
+        </div>
+    </section>
 
-        <table>
-            <thead>
-                <tr><th>Tag</th><th>Von</th><th>Bis</th><th>Dauer</th><th>Tätigkeit</th></tr>
-            </thead>
-            <tbody id="rows"></tbody>
-        </table>
-    </main>
-    <script src="script.js"></script>
+    <div class="grid">
+        <section class="card" aria-label="Stempeluhr">
+            <h2>Stempeluhr</h2>
+            <div class="timer" id="timer">00:00:00</div>
+            <p class="muted" id="status">Gerade nicht eingestempelt.</p>
+
+            <div class="field">
+                <label for="taskSel">Tätigkeit</label>
+                <select id="taskSel"></select>
+            </div>
+            <button class="stamp-btn" id="stampBtn" type="button">Einstempeln</button>
+        </section>
+
+        <section class="card" aria-label="Teamstatus">
+            <h2>Team</h2>
+            <ul class="team" id="board"></ul>
+        </section>
+    </div>
+
+    <section class="card" aria-label="Zeiteinträge">
+        <div class="card-head">
+            <h2>Deine Zeiteinträge</h2>
+            <button class="btn btn-small" id="exportBtn" type="button">Als CSV exportieren</button>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr><th>Tag</th><th>Von</th><th>Bis</th><th>Dauer</th><th>Tätigkeit</th><th><span class="sr-only">Aktion</span></th></tr>
+                </thead>
+                <tbody id="rows"></tbody>
+            </table>
+        </div>
+        <p class="empty" id="rowsEmpty" hidden>Noch keine Einträge. Stempel dich ein, damit Arbeit entsteht.</p>
+    </section>
+
+    <section class="card" aria-label="Lohnzettel">
+        <h2>Lohnzettel (voraussichtlich)</h2>
+        <dl class="pay">
+            <div><dt>Arbeitszeit diese Woche</dt><dd id="payWeek">0 Std 00 Min</dd></div>
+            <div><dt>Stundensatz</dt><dd>Reichweite</dd></div>
+            <div><dt>Brutto</dt><dd>0,00 €</dd></div>
+            <div><dt>Netto</dt><dd>0,00 €</dd></div>
+        </dl>
+        <p class="hint">Die Auszahlung erfolgt, sobald der Kanal monetarisiert ist.</p>
+    </section>
+
+</main>
+
+<footer class="footer">Twitchkiste Personalportal · Bei Fragen bitte nicht.</footer>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="script.js"></script>
 </body>
 </html>
