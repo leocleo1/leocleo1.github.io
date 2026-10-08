@@ -139,21 +139,45 @@ function toast(message, isError) {
     toastTimer = setTimeout(() => { t.hidden = true; }, 3500);
 }
 
-/* ---------- Store (localStorage) ---------- */
+/* ---------- Store (Firebase Realtime Database) ---------- */
+const firebaseConfig = {
+    apiKey: "AIzaSyD5M5lGi6-yPq-7T6wnIig5x-2dYR9ivwA",
+    authDomain: "twitchkiste-bc5f0.firebaseapp.com",
+    databaseURL: "https://twitchkiste-bc5f0-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "twitchkiste-bc5f0",
+    storageBucket: "twitchkiste-bc5f0.firebasestorage.app",
+    messagingSenderId: "304509620982",
+    appId: "1:304509620982:web:56b2dcdb97ef7fa77bd2d7"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
 const Store = {
     data: { employees: {}, shifts: [] },
     listeners: [],
 
-    load() {
-        try {
-            const parsed = JSON.parse(lsGet(DATA_KEY));
-            if (parsed && parsed.employees && Array.isArray(parsed.shifts)) this.data = parsed;
-        } catch (e) { /* leer starten */ }
-    },
+    /* Startet die Live-Verbindung. Das Promise ist fertig, sobald beide Listen einmal geladen sind. */
+    start() {
+        return new Promise((resolve) => {
+            let gotEmployees = false;
+            let gotShifts = false;
+            const check = () => { if (gotEmployees && gotShifts) resolve(); };
 
-    save() {
-        lsSet(DATA_KEY, JSON.stringify(this.data));
-        this.emit();
+            db.ref("employees").on("value", (snap) => {
+                this.data.employees = snap.val() || {};
+                gotEmployees = true;
+                this.emit();
+                check();
+            });
+
+            db.ref("shifts").on("value", (snap) => {
+                this.data.shifts = Object.values(snap.val() || {});
+                gotShifts = true;
+                this.emit();
+                check();
+            });
+        });
     },
 
     emit() {
@@ -161,38 +185,24 @@ const Store = {
         this.listeners.forEach((fn) => fn(this.data.employees, shifts));
     },
 
-    subscribe(fn) {
-        this.listeners.push(fn);
-        this.emit();
-    },
-
     getEmployee(key) {
-        return Promise.resolve(this.data.employees[key] || null);
+        return db.ref("employees/" + key).get().then((snap) => snap.val());
     },
 
     createEmployee(key, employee) {
-        this.data.employees[key] = employee;
-        this.save();
-        return Promise.resolve();
+        return db.ref("employees/" + key).set(employee);
     },
 
     startShift(shift) {
-        this.data.shifts.push(shift);
-        this.save();
-        return Promise.resolve();
+        return db.ref("shifts/" + shift.id).set(shift);
     },
 
     endShift(id) {
-        const shift = this.data.shifts.find((s) => s.id === id);
-        if (shift) shift.end = Date.now();
-        this.save();
-        return Promise.resolve();
+        return db.ref("shifts/" + id + "/end").set(Date.now());
     },
 
     deleteShift(id) {
-        this.data.shifts = this.data.shifts.filter((s) => s.id !== id);
-        this.save();
-        return Promise.resolve();
+        return db.ref("shifts/" + id).remove();
     }
 };
 
@@ -471,7 +481,7 @@ function exportCsv() {
 }
 
 /* ---------- Start ---------- */
-function init() {
+async function init() {
     for (const task of TASKS) {
         const option = el("option", "", task);
         option.value = task;
@@ -484,22 +494,17 @@ function init() {
     $("stampBtn").addEventListener("click", handleStamp);
     $("exportBtn").addEventListener("click", exportCsv);
 
-    Store.load();
     Store.listeners.push((employees, shifts) => {
         state.employees = employees;
         state.shifts = shifts;
         render();
     });
-    Store.emit();
-
-    /* Änderungen aus einem anderen Tab übernehmen */
-    window.addEventListener("storage", (e) => {
-        if (e.key === DATA_KEY) { Store.load(); Store.emit(); }
-    });
 
     setInterval(updateTimes, 1000);
 
-    /* Automatisch wieder anmelden */
+    /* Auf die ersten Daten warten, dann automatisch anmelden */
+    await Store.start();
+
     const saved = lsGet(SESSION_KEY);
     if (saved && Store.data.employees[saved]) {
         showApp(saved, Store.data.employees[saved].name || saved);

@@ -181,41 +181,30 @@ p { margin: 0; }
 .chip.on { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
 
 /* ---------- Login ---------- */
+/* ---------- Login ---------- */
 .auth {
     flex: 1;
     display: grid;
     place-items: center;
     padding: 32px 16px;
 }
+
 .auth-card {
     width: 100%;
-    max-width: 880px;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    max-width: 440px;
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: 14px;
     box-shadow: var(--shadow);
     overflow: hidden;
 }
-.auth-side {
-    background: var(--side-bg);
-    color: var(--side-ink);
+
+.auth-form {
     padding: 36px 32px;
     display: flex;
     flex-direction: column;
     gap: 16px;
 }
-.auth-side p { color: rgba(234, 241, 251, 0.8); }
-.auth-side ul { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
-.auth-side li { padding-left: 24px; position: relative; font-size: 14px; }
-.auth-side li::before {
-    content: ""; position: absolute; left: 0; top: 6px;
-    width: 12px; height: 7px;
-    border-left: 2px solid #7fd3b0; border-bottom: 2px solid #7fd3b0;
-    transform: rotate(-45deg);
-}
-.auth-form { padding: 36px 32px; display: flex; flex-direction: column; gap: 16px; }
 
 /* ---------- Dashboard ---------- */
 .app {

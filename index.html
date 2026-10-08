@@ -28,34 +28,43 @@
 <!-- ============ LOGIN ============ -->
 <main class="auth" id="loginView">
     <div class="auth-card">
-        <aside class="auth-side">
-            <h1>Zeiterfassung für Creator mit Verantwortung.</h1>
-            <p>Clips schneiden, Streams sichten, auf Inspiration warten. Alles sauber dokumentiert.</p>
-            <ul>
-                <li>Ein- und Ausstempeln mit einem Klick</li>
-                <li>Live-Teamstatus</li>
-                <li>Lohnzettel in Reichweite</li>
-            </ul>
-        </aside>
-
         <form class="auth-form" id="loginForm">
             <h2>Mitarbeiter-Login</h2>
 
             <div class="field">
                 <label for="nameIn">Name</label>
-                <input id="nameIn" type="text" maxlength="24" autocomplete="off" required placeholder="Dein Name">
+                <input id="nameIn" type="text" maxlength="24" autocomplete="off"
+                       required placeholder="Dein Name">
             </div>
+
             <div class="field">
                 <label for="pinIn">Passwort</label>
-                <input id="pinIn" type="password" maxlength="40" autocomplete="off" required placeholder="Kein echtes Passwort verwenden">
+                <input id="pinIn" type="password" maxlength="40" autocomplete="off"
+                       required placeholder="Kein echtes Passwort verwenden">
             </div>
 
-            <button class="btn btn-primary" id="loginBtn" type="submit">Anmelden</button>
+            <button class="btn btn-primary" id="loginBtn" type="submit">
+                Anmelden
+            </button>
+
             <p class="form-error" id="loginErr" role="alert" hidden></p>
 
-            <p class="hint">Neu hier? Name und Passwort eingeben, dein Account wird automatisch angelegt. Die Probezeit ist unbegrenzt.</p>
-            <p class="hint"><button class="link" id="forgotBtn" type="button">Passwort vergessen?</button></p>
-            <p class="hint" id="forgotTxt" hidden>Kein Problem. Wir schicken dir eine Mail an eine Adresse, die es nicht gibt. Bis die ankommt, melde dich einfach mit einem neuen Namen an. Dann bist du halt der Praktikant.</p>
+            <p class="hint">
+                Neu hier? Name und Passwort eingeben, dein Account wird automatisch angelegt.
+                Die Probezeit ist unbegrenzt.
+            </p>
+
+            <p class="hint">
+                <button class="link" id="forgotBtn" type="button">
+                    Passwort vergessen?
+                </button>
+            </p>
+
+            <p class="hint" id="forgotTxt" hidden>
+                Kein Problem. Wir schicken dir eine Mail an eine Adresse, die es nicht gibt.
+                Bis die ankommt, melde dich einfach mit einem neuen Namen an.
+                Dann bist du halt der Praktikant.
+            </p>
         </form>
     </div>
 </main>
@@ -142,6 +151,8 @@
 
 <div class="toast" id="toast" role="status" hidden></div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
 <script src="script.js"></script>
 </body>
 </html>
