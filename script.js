@@ -50,16 +50,16 @@ const MONTHS = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli",
 const SLOT_USERS = ["lip","leo"];
 const SLOT_START = 100;        // Startguthaben in Coins
 const COINS_PER_MIN = 1;       // Coins pro gearbeiteter Minute
-const SLOT_BETS = [5, 10, 25, 50, 100];
+const SLOT_BETS = [5, 10, 25, 50, 67, 100];
 
 /* weight = Häufigkeit, pay = Gewinn-Multiplikator bei drei gleichen Symbolen */
 const SLOT_SYMBOLS = [
-    { sym: "🎬", weight: 30, pay: 5 },
-    { sym: "📱", weight: 25, pay: 8 },
-    { sym: "🎮", weight: 20, pay: 12 },
-    { sym: "⭐", weight: 14, pay: 20 },
-    { sym: "💎", weight: 8, pay: 50 },
-    { sym: "7️⃣", weight: 3, pay: 100 }
+    { sym: "🎬", weight: 40, pay: 5 },
+    { sym: "📱", weight: 30, pay: 8 },
+    { sym: "🎮", weight: 16, pay: 12 },
+    { sym: "⭐", weight: 6, pay: 20 },
+    { sym: "💎", weight: 4, pay: 50 },
+    { sym: "7️⃣", weight: 4, pay: 100 }
 ];
 const JACKPOT_SYM = "7️⃣";
 
@@ -76,6 +76,15 @@ const LOSE_TEXTS = [
     "Knapp daneben ist auch vorbei.",
     "Nichts. Aber der nächste Dreh ist bestimmt der Richtige.",
     "Die Walzen schweigen."
+];
+
+const SIXSEVEN_TEXTS = [
+    "6 7! 🤷",
+    "Sixxx Sevennn.",
+    "67. Mehr muss man dazu nicht sagen.",
+    "Der Chef versteht den Witz nicht. Perfekt.",
+    "Arbeitszeitbetrug, aber mit Stil: 67.",
+    "6… 7… ja, das war's."
 ];
 
 /* ---------- Zustand ---------- */
@@ -509,15 +518,40 @@ function renderRanking() {
     renderTaskStats();
 }
 
+/* Farbe pro Person: eigene Avatar-Farbe, sonst eine feste Farbe aus der Palette */
+const STAT_PALETTE = ["#0b5fd3", "#12805c", "#c62f2f", "#b7791f", "#7b3fc4", "#0e8a9a", "#d2559b", "#5d6b80"];
+/* Verteilt Farben so, dass keine doppelt vorkommt */
+function colorMap(keys) {
+    const sorted = [...keys].sort();
+    const map = {};
+    const taken = new Set();
+
+    /* Erst eigene Profilfarben, jede nur einmal */
+    for (const key of sorted) {
+        const c = ((state.employees[key] || {}).color || "").toLowerCase();
+        if (c && !taken.has(c)) { map[key] = c; taken.add(c); }
+    }
+    /* Rest bekommt die nächste freie Farbe aus der Palette, danach generierte Farben */
+    let extra = 0;
+    for (const key of sorted) {
+        if (map[key]) continue;
+        let c = STAT_PALETTE.find((p) => !taken.has(p.toLowerCase()));
+        if (!c) c = "hsl(" + ((extra++ * 47) % 360) + " 60% 45%)";
+        map[key] = c;
+        taken.add(c.toLowerCase());
+    }
+    return map;
+}
+
 function renderTaskStats() {
     const range = $("rankRange").value;
     const from = range === "week" ? weekStart() : range === "month" ? monthStart() : 0;
     const mineOnly = $("statScope").value === "me";
     const now = Date.now();
 
-    /* Alle bekannten Tätigkeiten starten bei 0, damit die Liste stabil bleibt */
+    /* totals[Tätigkeit] = { sum, by: { personKey: ms } } */
     const totals = {};
-    for (const t of TASKS) totals[t] = 0;
+    for (const t of TASKS) totals[t] = { sum: 0, by: {} };
 
     for (const s of state.shifts) {
         if (mineOnly && s.emp !== state.meKey) continue;
@@ -525,11 +559,14 @@ function renderTaskStats() {
         if (end <= from) continue;
         const share = s.start >= from ? 1 : (end - from) / ((end - s.start) || 1);
         const task = s.task || "Ohne Tätigkeit";
-        totals[task] = (totals[task] || 0) + workMs(s, now) * share;
+        const ms = workMs(s, now) * share;
+        if (!totals[task]) totals[task] = { sum: 0, by: {} };
+        totals[task].sum += ms;
+        totals[task].by[s.emp] = (totals[task].by[s.emp] || 0) + ms;
     }
 
     const rows = Object.keys(totals)
-        .map((t) => ({ task: t, ms: totals[t] }))
+        .map((t) => ({ task: t, ms: totals[t].sum, by: totals[t].by }))
         .sort((a, b) => b.ms - a.ms);
     const sum = rows.reduce((a, r) => a + r.ms, 0);
     const max = Math.max(rows[0].ms, 1);
@@ -537,22 +574,58 @@ function renderTaskStats() {
     const box = $("statList");
     box.replaceChildren();
 
+    const usedKeys = new Set();
+    const colors = colorMap(Object.keys(state.employees));
+
     for (const r of rows) {
         const row = el("div", "stat-row");
         row.append(el("span", "stat-label", r.task));
 
-        const bar = el("div", "bar");
-        const fill = el("span");
-        fill.style.width = Math.round((r.ms / max) * 100) + "%";
-        bar.append(fill);
+        /* Außen: Länge relativ zur größten Tätigkeit. Innen: Segmente pro Person. */
+        const bar = el("div", "bar stacked");
+        const inner = el("div", "bar-inner");
+        inner.style.width = Math.round((r.ms / max) * 100) + "%";
+
+        const people = Object.keys(r.by).sort((a, b) => r.by[b] - r.by[a]);
+        for (const key of people) {
+            const ms = r.by[key];
+            if (ms <= 0) continue;
+            usedKeys.add(key);
+            const name = (state.employees[key] && state.employees[key].name) || key;
+            const pct = Math.round((ms / r.ms) * 100);
+
+            const seg = el("span", "seg");
+            seg.style.width = (ms / r.ms * 100) + "%";
+            seg.style.background = colors[key];
+            seg.tabIndex = 0;
+            seg.dataset.tip = name + ": " + fmtHM(ms) + " (" + pct + " %)";
+            seg.setAttribute("aria-label", seg.dataset.tip);
+            inner.append(seg);
+        }
+        bar.append(inner);
 
         const pct = sum ? Math.round((r.ms / sum) * 100) : 0;
         row.append(bar, el("span", "stat-time mono", fmtHM(r.ms) + " · " + pct + " %"));
         box.append(row);
     }
 
+    /* Legende */
+    if (usedKeys.size) {
+        const legend = el("div", "legend");
+        [...usedKeys]
+            .sort((a, b) => String((state.employees[a] || {}).name || a).localeCompare(String((state.employees[b] || {}).name || b)))
+            .forEach((key) => {
+                const item = el("span", "legend-item");
+                const dot = el("span", "legend-dot");
+                dot.style.background = colors[key];
+                item.append(dot, document.createTextNode((state.employees[key] && state.employees[key].name) || key));
+                legend.append(item);
+            });
+        box.append(legend);
+    }
+
     $("statNote").textContent = sum
-        ? "Die meiste Zeit ging für „" + rows[0].task + "“ drauf. Pausen zählen nicht mit."
+        ? "Die meiste Zeit ging für „" + rows[0].task + "“ drauf. Pausen zählen nicht mit. Über einen Abschnitt fahren für Details."
         : "Im gewählten Zeitraum wurde noch nichts gearbeitet.";
 }
 
@@ -1057,6 +1130,7 @@ extraRenderers.push(renderChat);
 
 /* ---------- Casino ---------- */
 const casino = { bet: 10, spinning: false, log: [] };
+let bg67Timer = null;
 const SLOT_TOTAL = SLOT_SYMBOLS.reduce((a, s) => a + s.weight, 0);
 
 const canSlot = () => SLOT_USERS.includes(state.meKey);
@@ -1087,6 +1161,21 @@ function evalSpin(result, bet) {
     return { win: 0, kind: "none" };
 }
 
+let sixSevenTimer = null;
+function sixSeven() {
+    if (casino.spinning) return;
+    const reels = document.querySelectorAll("#reels .reel");
+    ["6️⃣", "7️⃣", "🤷"].forEach((sym, i) => { reels[i].textContent = sym; });
+    $("slotMsg").textContent = SIXSEVEN_TEXTS[Math.floor(Math.random() * SIXSEVEN_TEXTS.length)];
+
+    const box = $("reels");
+    box.classList.remove("sixseven");
+    void box.offsetWidth;                    // Animation neu starten
+    box.classList.add("sixseven");
+    clearTimeout(sixSevenTimer);
+    sixSevenTimer = setTimeout(() => box.classList.remove("sixseven"), 1800);
+}
+
 /* Baut Einsatz-Buttons und Gewinntabelle einmalig auf */
 function buildCasinoUi() {
     const box = $("betBox");
@@ -1098,6 +1187,7 @@ function buildCasinoUi() {
             if (casino.spinning) return;
             casino.bet = value;
             renderSlots();
+            if (value === 67) sixSeven();
         });
         box.append(b);
     }
@@ -1154,6 +1244,9 @@ async function spin() {
     const result = [pickSymbol(), pickSymbol(), pickSymbol()];
     const outcome = evalSpin(result, bet);
     const delta = outcome.win - bet;
+    const slotCard = $("reels").closest(".card");
+    clearTimeout(bg67Timer);
+    slotCard.classList.toggle("bg67", bet === 67);
 
     casino.spinning = true;
     $("spinBtn").disabled = true;
@@ -1163,6 +1256,7 @@ async function spin() {
         await Store.addSlotNet(state.meKey, delta);
     } catch (e) {
         casino.spinning = false;
+        if (bet === 67) bg67Timer = setTimeout(() => slotCard.classList.remove("bg67"), 3500);
         renderSlots();
         toast("Dreh hat nicht geklappt.", true);
         return;
