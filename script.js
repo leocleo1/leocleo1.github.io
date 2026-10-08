@@ -17,7 +17,8 @@ const TASKS = [
     "Titel und Thumbnails",
     "Meeting im Discord",
     "Auf Inspiration warten",
-    "Strategisch aus dem Fenster schauen"
+    "Strategisch aus dem Fenster schauen",
+    "Arbeitszeitbetrug"
 ];
 
 const WRONG_PASSWORD = [
