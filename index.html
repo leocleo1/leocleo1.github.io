@@ -80,71 +80,215 @@
         <span class="chip" id="statusChip">Nicht eingestempelt</span>
     </div>
 
-    <section class="kpis" aria-label="Kennzahlen">
-        <div class="kpi">
-            <span class="kpi-label">Heute</span>
-            <span class="kpi-value" id="today">0 Std 00 Min</span>
-        </div>
-        <div class="kpi">
-            <span class="kpi-label">Diese Woche</span>
-            <span class="kpi-value" id="week">0 Std 00 Min</span>
-        </div>
-        <div class="kpi">
-            <span class="kpi-label">Im Büro</span>
-            <span class="kpi-value" id="teamCount">0 von 0</span>
-        </div>
-        <div class="kpi">
-            <span class="kpi-label">Stundensatz</span>
-            <span class="kpi-value">Reichweite</span>
-        </div>
-    </section>
+    <nav class="tabs" id="tabs" aria-label="Bereiche">
+        <button class="tab" type="button" data-tab="home">Stempeluhr</button>
+        <button class="tab" type="button" data-tab="ranking">Ranking</button>
+        <button class="tab" type="button" data-tab="calendar">Kalender</button>
+        <button class="tab" type="button" data-tab="vacation">Urlaub</button>
+        <button class="tab" type="button" data-tab="chat">Chat</button>
+        <button class="tab" type="button" data-tab="profile">Profil</button>
+    </nav>
 
-    <div class="grid">
-        <section class="card" aria-label="Stempeluhr">
-            <h2>Stempeluhr</h2>
-            <div class="timer" id="timer">00:00:00</div>
-            <p class="muted" id="status">Gerade nicht eingestempelt.</p>
+    <div class="view" data-view="home">
 
-            <div class="field">
-                <label for="taskSel">Tätigkeit</label>
-                <select id="taskSel"></select>
+        <section class="kpis" aria-label="Kennzahlen">
+            <div class="kpi">
+                <span class="kpi-label">Heute</span>
+                <span class="kpi-value" id="today">0 Std 00 Min</span>
             </div>
-            <button class="stamp-btn" id="stampBtn" type="button">Einstempeln</button>
+            <div class="kpi">
+                <span class="kpi-label">Diese Woche</span>
+                <span class="kpi-value" id="week">0 Std 00 Min</span>
+            </div>
+            <div class="kpi">
+                <span class="kpi-label">Im Büro</span>
+                <span class="kpi-value" id="teamCount">0 von 0</span>
+            </div>
+            <div class="kpi">
+                <span class="kpi-label">Stundensatz</span>
+                <span class="kpi-value">Reichweite</span>
+            </div>
         </section>
 
-        <section class="card" aria-label="Teamstatus">
-            <h2>Team</h2>
-            <ul class="team" id="board"></ul>
+        <div class="grid">
+            <section class="card" aria-label="Stempeluhr">
+                <h2>Stempeluhr</h2>
+                <div class="timer" id="timer">00:00:00</div>
+                <p class="muted" id="status">Gerade nicht eingestempelt.</p>
+
+                <div class="field">
+                    <label for="taskSel">Tätigkeit</label>
+                    <select id="taskSel"></select>
+                </div>
+                <button class="stamp-btn" id="stampBtn" type="button">Einstempeln</button>
+                <button class="btn" id="pauseBtn" type="button" hidden>Pause machen</button>
+            </section>
+
+            <section class="card" aria-label="Teamstatus">
+                <h2>Team</h2>
+                <ul class="team" id="board"></ul>
+            </section>
+        </div>
+
+        <section class="card" aria-label="Zeiteinträge">
+            <div class="card-head">
+                <h2>Deine Zeiteinträge</h2>
+                <button class="btn btn-small" id="exportBtn" type="button">Als CSV exportieren</button>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                    <tr><th>Tag</th><th>Von</th><th>Bis</th><th>Dauer</th><th>Tätigkeit</th><th><span class="sr-only">Aktion</span></th></tr>
+                    </thead>
+                    <tbody id="rows"></tbody>
+                </table>
+            </div>
+            <p class="empty" id="rowsEmpty" hidden>Noch keine Einträge. Stempel dich ein, damit Arbeit entsteht.</p>
+        </section>
+
+        <section class="card" aria-label="Lohnzettel">
+            <h2>Lohnzettel (voraussichtlich)</h2>
+            <dl class="pay">
+                <div><dt>Arbeitszeit diese Woche</dt><dd id="payWeek">0 Std 00 Min</dd></div>
+                <div><dt>Stundensatz</dt><dd>Reichweite</dd></div>
+                <div><dt>Brutto</dt><dd>0,00 €</dd></div>
+                <div><dt>Netto</dt><dd>0,00 €</dd></div>
+            </dl>
+            <p class="hint">Die Auszahlung erfolgt, sobald der Kanal monetarisiert ist.</p>
+        </section>
+    </div>
+    <div class="view" data-view="ranking" hidden>
+        <section class="card" aria-label="Ranking">
+            <div class="card-head">
+                <h2>Ranking</h2>
+                <div class="field range">
+                    <label class="sr-only" for="rankRange">Zeitraum</label>
+                    <select id="rankRange">
+                        <option value="all">Gesamt</option>
+                        <option value="month">Dieser Monat</option>
+                        <option value="week">Diese Woche</option>
+                    </select>
+                </div>
+            </div>
+            <ol class="rank" id="rankList"></ol>
+            <p class="hint" id="rankNote"></p>
         </section>
     </div>
 
-    <section class="card" aria-label="Zeiteinträge">
-        <div class="card-head">
-            <h2>Deine Zeiteinträge</h2>
-            <button class="btn btn-small" id="exportBtn" type="button">Als CSV exportieren</button>
-        </div>
-        <div class="table-wrap">
-            <table>
-                <thead>
-                <tr><th>Tag</th><th>Von</th><th>Bis</th><th>Dauer</th><th>Tätigkeit</th><th><span class="sr-only">Aktion</span></th></tr>
-                </thead>
-                <tbody id="rows"></tbody>
-            </table>
-        </div>
-        <p class="empty" id="rowsEmpty" hidden>Noch keine Einträge. Stempel dich ein, damit Arbeit entsteht.</p>
-    </section>
+    <div class="view" data-view="profile" hidden>
+        <section class="card" aria-label="Profil">
+            <h2>Dein Profil</h2>
+            <form class="form-grid" id="profileForm">
+                <div class="field">
+                    <label for="pfEmoji">Avatar-Emoji</label>
+                    <input id="pfEmoji" type="text" maxlength="8" autocomplete="off" placeholder="z. B. 🐸">
+                </div>
+                <div class="field">
+                    <label for="pfColor">Avatar-Farbe</label>
+                    <input id="pfColor" type="color" value="#0b5fd3">
+                </div>
+                <div class="field">
+                    <label for="pfMorning">Begrüßung morgens</label>
+                    <input id="pfMorning" type="text" maxlength="24" autocomplete="off" placeholder="Guten Morgen">
+                </div>
+                <div class="field">
+                    <label for="pfDay">Begrüßung tagsüber</label>
+                    <input id="pfDay" type="text" maxlength="24" autocomplete="off" placeholder="Guten Tag">
+                </div>
+                <div class="field">
+                    <label for="pfEvening">Begrüßung abends</label>
+                    <input id="pfEvening" type="text" maxlength="24" autocomplete="off" placeholder="Guten Abend">
+                </div>
+                <div class="field wide">
+                    <label for="pfMotto">Motto (im Team-Block zu sehen, wenn du nicht im Büro bist)</label>
+                    <input id="pfMotto" type="text" maxlength="60" autocomplete="off" placeholder="z. B. Arbeit ist nur ein Vorschlag">
+                </div>
+                <button class="btn btn-primary" type="submit">Profil speichern</button>
+            </form>
+            <p class="hint">Leere Felder bedeuten: Standardtext. Morgens ist bis 11 Uhr, tagsüber bis 18 Uhr.</p>
+        </section>
+    </div>
+    <div class="view" data-view="vacation" hidden>
+        <section class="card" aria-label="Urlaub beantragen">
+            <h2>Urlaub beantragen</h2>
+            <form class="form-grid" id="vacationForm">
+                <div class="field">
+                    <label for="vacFrom">Von</label>
+                    <input id="vacFrom" type="date" required>
+                </div>
+                <div class="field">
+                    <label for="vacTo">Bis</label>
+                    <input id="vacTo" type="date" required>
+                </div>
+                <div class="field wide">
+                    <label for="vacNote">Begründung</label>
+                    <input id="vacNote" type="text" maxlength="120" autocomplete="off" placeholder="z. B. Ich muss mich von meiner Arbeit erholen">
+                </div>
+                <button class="btn btn-primary" type="submit">Antrag einreichen</button>
+            </form>
+            <p class="hint">Der Chef entscheidet nach Tagesform. Ein Anspruch besteht nicht.</p>
+        </section>
 
-    <section class="card" aria-label="Lohnzettel">
-        <h2>Lohnzettel (voraussichtlich)</h2>
-        <dl class="pay">
-            <div><dt>Arbeitszeit diese Woche</dt><dd id="payWeek">0 Std 00 Min</dd></div>
-            <div><dt>Stundensatz</dt><dd>Reichweite</dd></div>
-            <div><dt>Brutto</dt><dd>0,00 €</dd></div>
-            <div><dt>Netto</dt><dd>0,00 €</dd></div>
-        </dl>
-        <p class="hint">Die Auszahlung erfolgt, sobald der Kanal monetarisiert ist.</p>
-    </section>
+        <section class="card" aria-label="Anträge">
+            <h2 id="vacTitle">Deine Anträge</h2>
+            <ul class="team" id="vacList"></ul>
+            <p class="empty" id="vacEmpty" hidden>Keine Anträge. Entweder fleißig oder faul.</p>
+        </section>
+    </div>
+    <div class="view" data-view="calendar" hidden>
+        <section class="card" aria-label="Kalender">
+            <div class="card-head">
+                <h2 id="calTitle">Kalender</h2>
+                <div class="cal-nav">
+                    <button class="btn btn-small" id="calPrev" type="button" aria-label="Vorheriger Monat">‹</button>
+                    <button class="btn btn-small" id="calToday" type="button">Heute</button>
+                    <button class="btn btn-small" id="calNext" type="button" aria-label="Nächster Monat">›</button>
+                </div>
+            </div>
+            <div class="table-wrap"><div class="cal" id="calGrid"></div></div>
+            <p class="hint">Tag anklicken, um das Datum für ein neues Meeting zu übernehmen. Genehmigter Urlaub wird grün angezeigt.</p>
+        </section>
 
+        <section class="card" aria-label="Meeting eintragen">
+            <h2>Meeting eintragen</h2>
+            <form class="form-grid" id="meetingForm">
+                <div class="field wide">
+                    <label for="mtTitle">Titel</label>
+                    <input id="mtTitle" type="text" maxlength="60" autocomplete="off" required placeholder="z. B. Meeting über Meetings">
+                </div>
+                <div class="field">
+                    <label for="mtDate">Datum</label>
+                    <input id="mtDate" type="date" required>
+                </div>
+                <div class="field">
+                    <label for="mtTime">Uhrzeit</label>
+                    <input id="mtTime" type="time">
+                </div>
+                <button class="btn btn-primary" type="submit">Eintragen</button>
+            </form>
+        </section>
+
+        <section class="card" aria-label="Anstehende Meetings">
+            <h2>Anstehende Meetings</h2>
+            <ul class="team" id="meetList"></ul>
+            <p class="empty" id="meetEmpty" hidden>Nichts geplant. Genieß die Ruhe.</p>
+        </section>
+    </div>
+    <div class="view" data-view="chat" hidden>
+        <section class="card" aria-label="Chat">
+            <div class="card-head">
+                <h2>Team-Chat</h2>
+                <button class="btn btn-small" id="chatClear" type="button" hidden>Chat leeren</button>
+            </div>
+            <ul class="chat" id="chatList"></ul>
+            <p class="empty" id="chatEmpty" hidden>Noch nichts geschrieben. Die Stille ist laut.</p>
+            <form class="chat-form" id="chatForm">
+                <input id="chatIn" type="text" maxlength="300" autocomplete="off" required placeholder="Nachricht schreiben …">
+                <button class="btn btn-primary" type="submit">Senden</button>
+            </form>
+            <p class="hint">Der Chat zeigt die letzten 100 Nachrichten. Nichts Privates schreiben, die Datenbank ist offen.</p>
+        </section>
+    </div>
 </main>
 
 <footer class="footer">Twitchkiste Personalportal · Bei Fragen bitte nicht.</footer>

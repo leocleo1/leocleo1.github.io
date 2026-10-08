@@ -12,7 +12,7 @@
 /* ---------- Konstanten ---------- */
 const TASKS = [
     "Clips schneiden",
-    "Twitch-VODs sichten",
+    "Twitch Streams sichten",
     "TikTok hochladen",
     "Titel und Thumbnails",
     "Meeting im Discord",
@@ -40,15 +40,30 @@ const AWAY_TEXTS = [
 
 const DATA_KEY = "twitchkiste-data";
 const SESSION_KEY = "twitchkiste-session";
+const MAX_WORK_MS = 8 * 60 * 60 * 1000;   // nach 8 Stunden Arbeitszeit wird ausgestempelt
+const BOSS_KEY = "leo";
+const TAB_KEY = "twitchkiste-tab";
+const MONTHS = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli",
+    "August", "September", "Oktober", "November", "Dezember"];
 
 /* ---------- Zustand ---------- */
 const state = {
     employees: {},
     shifts: [],
+    vacations: [],
+    meetings: [],
+    chat: [],
     meKey: null,
     meName: "",
-    busy: false
+    busy: false,
+    tab: "home",
+    cal: { y: new Date().getFullYear(), m: new Date().getMonth() }
 };
+
+/* Hier tragen sich die neuen Bereiche selbst ein (siehe spätere Schritte) */
+const extraRenderers = [];
+const tabHooks = {};
+function renderExtras() { extraRenderers.forEach((fn) => fn()); }
 
 /* ---------- Hilfsfunktionen ---------- */
 const $ = (id) => document.getElementById(id);
@@ -113,16 +128,96 @@ const fmtTime = (ts) => new Date(ts).toLocaleTimeString("de-AT", { hour: "2-digi
 const fmtDay = (ts) => new Date(ts).toLocaleDateString("de-AT", { weekday: "short", day: "2-digit", month: "2-digit" });
 
 /* Summe der Arbeitszeit einer Person ab einem Zeitpunkt (laufende Schicht zählt mit) */
+/* Reine Arbeitszeit einer Schicht, ohne Pausen */
+function workMs(shift, now = Date.now()) {
+    const end = shift.end || now;
+    const runningPause = shift.pauseStart ? Math.max(0, end - shift.pauseStart) : 0;
+    return Math.max(0, end - shift.start - (shift.pauseMs || 0) - runningPause);
+}
+
+/* Summe der Arbeitszeit einer Person ab einem Zeitpunkt (laufende Schicht zählt mit) */
 function sumMs(key, from) {
     const now = Date.now();
     let total = 0;
     for (const s of state.shifts) {
         if (s.emp !== key) continue;
         const end = s.end || now;
-        const start = Math.max(s.start, from);
-        if (end > start) total += end - start;
+        if (end <= from) continue;
+        const gross = end - s.start;
+        const share = s.start >= from ? 1 : (end - from) / (gross || 1);
+        total += workMs(s, now) * share;
     }
     return total;
+}
+
+const isBoss = () => state.meKey === BOSS_KEY;
+
+function dateStr(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+const todayStr = () => dateStr(new Date());
+const fmtDateStr = (ds) => new Date(ds + "T00:00").toLocaleDateString("de-AT",
+    { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
+
+function monthStart() {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(1);
+    return d.getTime();
+}
+
+/* Ist die Person heute im genehmigten Urlaub? */
+function onVacation(key) {
+    const t = todayStr();
+    return state.vacations.some((v) => v.emp === key && v.status === "approved" && v.from <= t && t <= v.to);
+}
+
+/* Begrüßung nach Tageszeit, mit eigenen Texten aus dem Profil */
+function myGreeting() {
+    const me = state.employees[state.meKey] || {};
+    const hour = new Date().getHours();
+    if (hour < 11) return me.greetMorning || "Guten Morgen";
+    if (hour < 18) return me.greetDay || "Guten Tag";
+    return me.greetEvening || "Guten Abend";
+}
+
+/* Avatar: Emoji statt Buchstabe, eigene Farbe */
+function styleAvatar(node, emp, name) {
+    node.textContent = (emp && emp.emoji) || name.charAt(0).toUpperCase();
+    node.style.background = (emp && emp.color) || "";
+    node.style.color = (emp && emp.color) ? "#ffffff" : "";
+}
+
+function avatarEl(emp, name) {
+    const node = el("span", "avatar");
+    styleAvatar(node, emp, name);
+    return node;
+}
+
+/* Button mit Rückfrage: erster Klick fragt nach, zweiter führt aus */
+function armedButton(label, onConfirm) {
+    const button = el("button", "btn btn-small", label);
+    button.type = "button";
+    let armed = false;
+    let timer = null;
+
+    button.addEventListener("click", async () => {
+        if (!armed) {
+            armed = true;
+            button.textContent = "Wirklich?";
+            timer = setTimeout(() => { armed = false; button.textContent = label; }, 3000);
+            return;
+        }
+        clearTimeout(timer);
+        button.disabled = true;
+        try {
+            await onConfirm();
+        } catch (e) {
+            button.disabled = false;
+            armed = false;
+            button.textContent = label;
+            toast("Das hat nicht geklappt.", true);
+        }
+    });
+    return button;
 }
 
 function activeShift(key) {
@@ -154,82 +249,99 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
 const Store = {
-    data: { employees: {}, shifts: [] },
+    data: { employees: {}, shifts: [], vacations: [], meetings: [], chat: [] },
     listeners: [],
 
-    /* Startet die Live-Verbindung. Das Promise ist fertig, sobald beide Listen einmal geladen sind. */
+    /* Startet alle Live-Verbindungen. Fertig, sobald alles einmal geladen ist. */
     start() {
         return new Promise((resolve) => {
-            let gotEmployees = false;
-            let gotShifts = false;
-            const check = () => { if (gotEmployees && gotShifts) resolve(); };
+            const waiting = new Set(["employees", "shifts", "vacations", "meetings", "chat"]);
+            const got = (name) => {
+                waiting.delete(name);
+                this.emit();
+                if (!waiting.size) resolve();
+            };
 
             db.ref("employees").on("value", (snap) => {
                 this.data.employees = snap.val() || {};
-                gotEmployees = true;
-                this.emit();
-                check();
+                got("employees");
             });
-
             db.ref("shifts").on("value", (snap) => {
                 this.data.shifts = Object.values(snap.val() || {});
-                gotShifts = true;
-                this.emit();
-                check();
+                got("shifts");
+            });
+            db.ref("vacations").on("value", (snap) => {
+                this.data.vacations = Object.values(snap.val() || {});
+                got("vacations");
+            });
+            db.ref("meetings").on("value", (snap) => {
+                this.data.meetings = Object.values(snap.val() || {});
+                got("meetings");
+            });
+            /* Chat: nur die letzten 100 Nachrichten, die Push-Keys sind zeitlich sortiert */
+            db.ref("chat").limitToLast(100).on("value", (snap) => {
+                const list = [];
+                snap.forEach((child) => { list.push(child.val()); });
+                this.data.chat = list;
+                got("chat");
             });
         });
     },
 
     emit() {
-        const shifts = [...this.data.shifts].sort((a, b) => b.start - a.start);
-        this.listeners.forEach((fn) => fn(this.data.employees, shifts));
+        this.listeners.forEach((fn) => fn(this.data));
     },
 
-    getEmployee(key) {
-        return db.ref("employees/" + key).get().then((snap) => snap.val());
-    },
+    /* Mitarbeiter */
+    getEmployee(key) { return db.ref("employees/" + key).get().then((snap) => snap.val()); },
+    createEmployee(key, employee) { return db.ref("employees/" + key).set(employee); },
+    updateEmployee(key, fields) { return db.ref("employees/" + key).update(fields); },
 
-    createEmployee(key, employee) {
-        return db.ref("employees/" + key).set(employee);
-    },
+    /* Schichten */
+    startShift(shift) { return db.ref("shifts/" + shift.id).set(shift); },
+    updateShift(id, fields) { return db.ref("shifts/" + id).update(fields); },
+    deleteShift(id) { return db.ref("shifts/" + id).remove(); },
 
-    startShift(shift) {
-        return db.ref("shifts/" + shift.id).set(shift);
-    },
+    /* Urlaub und Meetings (gleiche Form, deshalb ein gemeinsamer Satz Methoden) */
+    saveItem(path, item) { return db.ref(path + "/" + item.id).set(item); },
+    updateItem(path, id, fields) { return db.ref(path + "/" + id).update(fields); },
+    removeItem(path, id) { return db.ref(path + "/" + id).remove(); },
 
-    endShift(id) {
-        return db.ref("shifts/" + id + "/end").set(Date.now());
-    },
-
-    deleteShift(id) {
-        return db.ref("shifts/" + id).remove();
-    }
+    /* Chat */
+    sendChat(message) { return db.ref("chat").push(message); },
+    clearChat() { return db.ref("chat").remove(); }
 };
 
 /* ---------- Anzeige ---------- */
 function render() {
     if (!state.meKey) return;
 
+    const me = state.employees[state.meKey] || {};
     const active = activeShift(state.meKey);
-    const hour = new Date().getHours();
-    const greeting = hour < 11 ? "Guten Morgen" : hour < 18 ? "Guten Tag" : "Guten Abend";
+    const paused = !!(active && active.pauseStart);
 
-    $("hello").textContent = greeting + ", " + state.meName;
+    $("hello").textContent = myGreeting() + ", " + state.meName;
     $("dateLine").textContent = new Date().toLocaleDateString("de-AT", { weekday: "long", day: "numeric", month: "long" });
     $("userName").textContent = state.meName;
-    $("userAvatar").textContent = state.meName.charAt(0).toUpperCase();
+    styleAvatar($("userAvatar"), me, state.meName);
 
     const chip = $("statusChip");
-    chip.textContent = active ? "Im Dienst" : "Nicht eingestempelt";
-    chip.className = "chip" + (active ? " on" : "");
+    chip.textContent = !active ? "Nicht eingestempelt" : paused ? "In Pause" : "Im Dienst";
+    chip.className = "chip" + (active && !paused ? " on" : "");
 
-    $("status").textContent = active
-        ? "Seit " + fmtTime(active.start) + " im Dienst: " + active.task
-        : "Gerade nicht eingestempelt.";
+    $("status").textContent = !active
+        ? "Gerade nicht eingestempelt."
+        : paused
+            ? "In Pause seit " + fmtTime(active.pauseStart) + ". Die Uhr steht."
+            : "Seit " + fmtTime(active.start) + " im Dienst: " + active.task;
 
     const button = $("stampBtn");
     button.textContent = active ? "Ausstempeln" : "Einstempeln";
     button.className = "stamp-btn" + (active ? " out" : "");
+
+    const pauseBtn = $("pauseBtn");
+    pauseBtn.hidden = !active;
+    pauseBtn.textContent = paused ? "Pause beenden" : "Pause machen";
 
     const select = $("taskSel");
     select.disabled = !!active;
@@ -238,6 +350,7 @@ function render() {
     renderTeam();
     renderRows();
     updateTimes();
+    renderExtras();
 }
 
 function renderTeam() {
@@ -253,10 +366,12 @@ function renderTeam() {
         const emp = state.employees[key];
         const name = emp.name || key;
         const active = activeShift(key);
+        const paused = !!(active && active.pauseStart);
+        const vacation = !active && onVacation(key);
         if (active) online++;
 
         const li = el("li", "member");
-        li.append(el("span", "avatar", name.charAt(0).toUpperCase()));
+        li.append(avatarEl(emp, name));
 
         const info = el("div");
         info.append(el("div", "member-name", name + (key === state.meKey ? " (du)" : "")));
@@ -265,8 +380,12 @@ function renderTeam() {
         if (active) {
             sub.append(document.createTextNode(active.task + " · seit " + fmtTime(active.start) + " · "));
             const since = el("span", "mono");
-            since.dataset.since = String(active.start);
+            since.dataset.shift = active.id;
             sub.append(since);
+        } else if (vacation) {
+            sub.textContent = "Im Urlaub 🏖️";
+        } else if (emp.motto) {
+            sub.textContent = emp.motto;
         } else {
             let h = 0;
             for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
@@ -281,7 +400,8 @@ function renderTeam() {
         week.append(weekValue);
         info.append(week);
 
-        li.append(info, el("span", "pill" + (active ? " on" : ""), active ? "Im Büro" : "Nicht erreichbar"));
+        const label = active ? (paused ? "In Pause" : "Im Büro") : vacation ? "Im Urlaub" : "Nicht erreichbar";
+        li.append(info, el("span", "pill" + (active && !paused ? " on" : ""), label));
         list.append(li);
     }
 
@@ -299,8 +419,8 @@ function renderRows() {
         const tr = el("tr", shift.end ? "" : "live");
         tr.append(el("td", "", fmtDay(shift.start)), el("td", "", fmtTime(shift.start)), el("td", "", shift.end ? fmtTime(shift.end) : "läuft"));
 
-        const duration = el("td", "", fmtDur((shift.end || Date.now()) - shift.start));
-        if (!shift.end) duration.dataset.since = String(shift.start);
+        const duration = el("td", "", fmtDur(workMs(shift)));
+        if (!shift.end) duration.dataset.shift = shift.id;
         tr.append(duration, el("td", "task", shift.task || ""));
 
         const action = el("td");
@@ -309,6 +429,51 @@ function renderRows() {
         body.append(tr);
     }
 }
+
+function renderRanking() {
+    const list = $("rankList");
+    const range = $("rankRange").value;
+    const from = range === "week" ? weekStart() : range === "month" ? monthStart() : 0;
+
+    const rows = Object.keys(state.employees)
+        .map((key) => ({ key: key, emp: state.employees[key], ms: sumMs(key, from) }))
+        .sort((a, b) => b.ms - a.ms);
+
+    list.replaceChildren();
+    const max = rows.length ? Math.max(rows[0].ms, 1) : 1;
+    const medals = ["🥇", "🥈", "🥉"];
+
+    rows.forEach((r, i) => {
+        const name = r.emp.name || r.key;
+        const li = el("li", "rank-row");
+        li.append(el("span", "rank-pos", medals[i] || String(i + 1)), avatarEl(r.emp, name));
+
+        const mid = el("div");
+        mid.append(el("div", "member-name", name + (r.key === state.meKey ? " (du)" : "")));
+        const bar = el("div", "bar");
+        const fill = el("span");
+        fill.style.width = Math.round((r.ms / max) * 100) + "%";
+        bar.append(fill);
+        mid.append(bar);
+
+        li.append(mid, el("span", "rank-time mono", fmtHM(r.ms)));
+        list.append(li);
+    });
+
+    const note = $("rankNote");
+    if (!rows.length || rows[0].ms === 0) {
+        note.textContent = "Noch hat niemand gearbeitet. Wie überraschend.";
+    } else if (rows.length > 1) {
+        const first = rows[0].emp.name || rows[0].key;
+        const last = rows[rows.length - 1].emp.name || rows[rows.length - 1].key;
+        note.textContent = first + " ist der Streber der Runde. Schlusslicht: " + last + ".";
+    } else {
+        note.textContent = "";
+    }
+}
+
+tabHooks.ranking = renderRanking;
+extraRenderers.push(renderRanking);
 
 /* Löschen mit Bestätigung im Button: erster Klick fragt nach, zweiter löscht */
 function deleteButton(id) {
@@ -343,8 +508,9 @@ function updateTimes() {
     const now = Date.now();
     const ws = weekStart();
 
-    document.querySelectorAll("[data-since]").forEach((n) => {
-        n.textContent = fmtDur(now - Number(n.dataset.since));
+    document.querySelectorAll("[data-shift]").forEach((n) => {
+        const s = state.shifts.find((x) => x.id === n.dataset.shift);
+        if (s) n.textContent = fmtDur(workMs(s, now));
     });
     document.querySelectorAll("[data-wk]").forEach((n) => {
         n.textContent = fmtHM(sumMs(n.dataset.wk, ws));
@@ -354,13 +520,23 @@ function updateTimes() {
     const active = activeShift(state.meKey);
     const weekText = fmtHM(sumMs(state.meKey, ws));
 
-    $("timer").textContent = active ? fmtDur(now - active.start) : "00:00:00";
+    $("timer").textContent = active ? fmtDur(workMs(active, now)) : "00:00:00";
     $("today").textContent = fmtHM(sumMs(state.meKey, dayStart()));
     $("week").textContent = weekText;
     $("payWeek").textContent = weekText;
+
+    if (state.tab === "ranking") renderRanking();
 }
 
 /* ---------- Aktionen ---------- */
+function showTab(name) {
+    state.tab = name;
+    lsSet(TAB_KEY, name);
+    document.querySelectorAll("[data-view]").forEach((v) => { v.hidden = v.dataset.view !== name; });
+    document.querySelectorAll("[data-tab]").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+    if (tabHooks[name]) tabHooks[name]();
+}
+
 function showApp(key, name) {
     state.meKey = key;
     state.meName = name;
@@ -369,9 +545,19 @@ function showApp(key, name) {
     $("appView").hidden = false;
     $("userBox").hidden = false;
     render();
+
+    const saved = lsGet(TAB_KEY);
+    showTab(document.querySelector('[data-view="' + saved + '"]') ? saved : "home");
 }
 
-function logout() {
+async function logout() {
+    const active = state.meKey ? activeShift(state.meKey) : null;
+    if (active) {
+        try {
+            await Store.updateShift(active.id, { end: active.pauseStart || Date.now(), pauseStart: null });
+            toast("Beim Abmelden automatisch ausgestempelt.");
+        } catch (e) { /* trotzdem abmelden */ }
+    }
     lsDel(SESSION_KEY);
     state.meKey = null;
     state.meName = "";
@@ -412,7 +598,8 @@ async function handleLogin(event) {
             toast("Willkommen im Team! Dein Vertrag wurde automatisch akzeptiert.");
         }
     } catch (e) {
-        error.textContent = "Anmeldung fehlgeschlagen. Bitte noch einmal versuchen.";
+        console.error("Login-Fehler:", e);
+        error.textContent = "Anmeldung fehlgeschlagen. Bitte noch einmal versuchen."+ (e && e.message ? e.message : e);
         error.hidden = false;
     } finally {
         state.busy = false;
@@ -429,7 +616,7 @@ async function handleStamp() {
     try {
         const active = activeShift(state.meKey);
         if (active) {
-            await Store.endShift(active.id);
+            await Store.updateShift(active.id, { end: active.pauseStart || Date.now(), pauseStart: null });
             toast("Ausgestempelt. Gute Arbeit, naja, okay.");
         } else {
             const start = Date.now();
@@ -448,6 +635,77 @@ async function handleStamp() {
     } finally {
         state.busy = false;
         button.disabled = false;
+    }
+}
+
+async function handlePause() {
+    if (state.busy || !state.meKey) return;
+    const active = activeShift(state.meKey);
+    if (!active) return;
+
+    state.busy = true;
+    try {
+        if (active.pauseStart) {
+            await Store.updateShift(active.id, {
+                pauseMs: (active.pauseMs || 0) + (Date.now() - active.pauseStart),
+                pauseStart: null
+            });
+            toast("Pause vorbei. Zurück an die Arbeit.");
+        } else {
+            await Store.updateShift(active.id, { pauseStart: Date.now() });
+            toast("Pause läuft. Die Uhr steht.");
+        }
+    } catch (e) {
+        toast("Pause hat nicht geklappt.", true);
+    } finally {
+        state.busy = false;
+    }
+}
+
+function fillProfile() {
+    const me = state.employees[state.meKey] || {};
+    $("pfEmoji").value = me.emoji || "";
+    $("pfColor").value = me.color || "#0b5fd3";
+    $("pfMorning").value = me.greetMorning || "";
+    $("pfDay").value = me.greetDay || "";
+    $("pfEvening").value = me.greetEvening || "";
+    $("pfMotto").value = me.motto || "";
+}
+
+async function saveProfile(event) {
+    event.preventDefault();
+    if (!state.meKey) return;
+    try {
+        await Store.updateEmployee(state.meKey, {
+            emoji: $("pfEmoji").value.trim() || null,
+            color: $("pfColor").value,
+            greetMorning: $("pfMorning").value.trim() || null,
+            greetDay: $("pfDay").value.trim() || null,
+            greetEvening: $("pfEvening").value.trim() || null,
+            motto: $("pfMotto").value.trim() || null
+        });
+        toast("Profil gespeichert.");
+    } catch (e) {
+        toast("Speichern hat nicht geklappt.", true);
+    }
+}
+
+tabHooks.profile = fillProfile;
+
+/* Beendet Schichten, die 8 Stunden Arbeitszeit erreicht haben. Läuft bei jedem offenen Browser
+   mit. Das Ende wird exakt berechnet, auch wenn die Seite erst später jemand öffnet. */
+const autoStopped = new Set();
+
+function checkAutoStop() {
+    const now = Date.now();
+    for (const s of state.shifts) {
+        if (s.end || s.pauseStart || autoStopped.has(s.id)) continue;
+        if (workMs(s, now) < MAX_WORK_MS) continue;
+
+        autoStopped.add(s.id);
+        const endTs = s.start + (s.pauseMs || 0) + MAX_WORK_MS;
+        Store.updateShift(s.id, { end: endTs, pauseStart: null }).catch(() => autoStopped.delete(s.id));
+        if (s.emp === state.meKey) toast("8 Stunden erreicht. Du wurdest automatisch ausgestempelt.");
     }
 }
 
@@ -480,6 +738,236 @@ function exportCsv() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+const VAC_LABEL = { pending: "Wartet auf den Chef", approved: "Genehmigt", denied: "Abgelehnt" };
+
+async function submitVacation(event) {
+    event.preventDefault();
+    const from = $("vacFrom").value;
+    const to = $("vacTo").value;
+    if (!from || !to) return;
+    if (to < from) {
+        toast("Das Ende liegt vor dem Anfang. Zeitreisen sind nicht genehmigungsfähig.", true);
+        return;
+    }
+    const id = state.meKey + "_" + Date.now();
+    try {
+        await Store.saveItem("vacations", {
+            id: id, emp: state.meKey, name: state.meName,
+            from: from, to: to, note: $("vacNote").value.trim(),
+            status: "pending", created: Date.now()
+        });
+        $("vacationForm").reset();
+        toast("Antrag eingereicht. Jetzt hilft nur noch Beten.");
+    } catch (e) {
+        toast("Antrag konnte nicht gesendet werden.", true);
+    }
+}
+
+function decideVacation(id, status) {
+    Store.updateItem("vacations", id, { status: status, decided: Date.now() })
+        .then(() => toast(status === "approved" ? "Urlaub genehmigt." : "Urlaub abgelehnt. Hart, aber fair."))
+        .catch(() => toast("Das hat nicht geklappt.", true));
+}
+
+function renderVacations() {
+    const list = $("vacList");
+    list.replaceChildren();
+
+    const boss = isBoss();
+    const shown = state.vacations
+        .filter((v) => boss || v.emp === state.meKey)
+        .sort((a, b) => b.created - a.created);
+
+    $("vacTitle").textContent = boss ? "Alle Anträge (Chef-Ansicht)" : "Deine Anträge";
+    $("vacEmpty").hidden = shown.length > 0;
+
+    /* Offene Anträge als Zahl am Tab, nur für den Chef */
+    const open = boss ? state.vacations.filter((v) => v.status === "pending").length : 0;
+    document.querySelector('[data-tab="vacation"]').textContent = "Urlaub" + (open ? " (" + open + ")" : "");
+
+    for (const v of shown) {
+        const li = el("li", "item");
+
+        const days = Math.round((new Date(v.to) - new Date(v.from)) / 86400000) + 1;
+        const info = el("div");
+        info.append(el("div", "member-name", v.name + ": " + fmtDateStr(v.from) + " bis " + fmtDateStr(v.to)));
+        info.append(el("div", "member-sub", days + (days === 1 ? " Tag" : " Tage") + (v.note ? " · " + v.note : "")));
+
+        const side = el("div", "item-side");
+        const tone = v.status === "approved" ? " on" : v.status === "denied" ? " bad" : "";
+        side.append(el("span", "pill" + tone, VAC_LABEL[v.status] || v.status));
+
+        if (boss && v.status === "pending") {
+            const yes = el("button", "btn btn-small btn-primary", "Genehmigen");
+            yes.type = "button";
+            yes.addEventListener("click", () => decideVacation(v.id, "approved"));
+            const no = el("button", "btn btn-small", "Ablehnen");
+            no.type = "button";
+            no.addEventListener("click", () => decideVacation(v.id, "denied"));
+            side.append(yes, no);
+        }
+
+        if (boss || (v.emp === state.meKey && v.status === "pending")) {
+            side.append(armedButton(boss ? "Löschen" : "Zurückziehen", () => Store.removeItem("vacations", v.id)));
+        }
+
+        li.append(info, side);
+        list.append(li);
+    }
+}
+
+extraRenderers.push(renderVacations);
+
+const byTime = (a, b) => String(a.time || "").localeCompare(String(b.time || ""));
+
+function renderCalendar() {
+    const y = state.cal.y;
+    const m = state.cal.m;
+    $("calTitle").textContent = MONTHS[m] + " " + y;
+
+    const grid = $("calGrid");
+    grid.replaceChildren();
+    for (const d of ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]) grid.append(el("div", "cal-dow", d));
+
+    const offset = (new Date(y, m, 1).getDay() + 6) % 7;   // Montag = 0
+    const days = new Date(y, m + 1, 0).getDate();
+    const today = todayStr();
+
+    for (let i = 0; i < offset; i++) grid.append(el("div", "cal-cell blank"));
+
+    for (let day = 1; day <= days; day++) {
+        const ds = y + "-" + pad(m + 1) + "-" + pad(day);
+        const cell = el("button", "cal-cell" + (ds === today ? " today" : ""));
+        cell.type = "button";
+        cell.dataset.date = ds;
+        cell.append(el("span", "cal-num", String(day)));
+
+        for (const mt of state.meetings.filter((x) => x.date === ds).sort(byTime)) {
+            cell.append(el("span", "cal-ev meet", ((mt.time || "") + " " + mt.title).trim()));
+        }
+        for (const v of state.vacations) {
+            if (v.status === "approved" && v.from <= ds && ds <= v.to) {
+                cell.append(el("span", "cal-ev vac", "🏖️ " + v.name));
+            }
+        }
+        grid.append(cell);
+    }
+}
+
+function renderMeetings() {
+    const list = $("meetList");
+    list.replaceChildren();
+
+    const today = todayStr();
+    const upcoming = state.meetings
+        .filter((x) => x.date >= today)
+        .sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")))
+        .slice(0, 20);
+
+    $("meetEmpty").hidden = upcoming.length > 0;
+
+    for (const mt of upcoming) {
+        const li = el("li", "item");
+        const info = el("div");
+        info.append(el("div", "member-name", mt.title));
+        info.append(el("div", "member-sub",
+            fmtDateStr(mt.date) + (mt.time ? " · " + mt.time + " Uhr" : "") + " · von " + (mt.name || "?")));
+
+        const side = el("div", "item-side");
+        if (isBoss() || mt.emp === state.meKey) {
+            side.append(armedButton("Löschen", () => Store.removeItem("meetings", mt.id)));
+        }
+        li.append(info, side);
+        list.append(li);
+    }
+}
+
+async function submitMeeting(event) {
+    event.preventDefault();
+    const title = $("mtTitle").value.trim();
+    const date = $("mtDate").value;
+    if (!title || !date) return;
+
+    const id = state.meKey + "_" + Date.now();
+    try {
+        await Store.saveItem("meetings", {
+            id: id, title: title, date: date, time: $("mtTime").value || "",
+            emp: state.meKey, name: state.meName
+        });
+        $("meetingForm").reset();
+        toast("Meeting eingetragen. Alle müssen jetzt hin.");
+    } catch (e) {
+        toast("Meeting konnte nicht gespeichert werden.", true);
+    }
+}
+
+function shiftMonth(delta) {
+    const d = new Date(state.cal.y, state.cal.m + delta, 1);
+    state.cal = { y: d.getFullYear(), m: d.getMonth() };
+    renderCalendar();
+}
+
+extraRenderers.push(renderCalendar, renderMeetings);
+
+function scrollChat() {
+    const list = $("chatList");
+    list.scrollTop = list.scrollHeight;
+}
+
+function renderChat() {
+    const list = $("chatList");
+    /* Nur nach unten scrollen, wenn man schon unten war (sonst nervt es beim Nachlesen) */
+    const wasAtBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 60;
+
+    list.replaceChildren();
+    $("chatEmpty").hidden = state.chat.length > 0;
+    $("chatClear").hidden = !isBoss();
+
+    const todayText = new Date().toDateString();
+    for (const m of state.chat) {
+        const sender = state.employees[m.emp] || {};
+        const when = new Date(m.ts).toDateString() === todayText
+            ? fmtTime(m.ts)
+            : fmtDay(m.ts) + " " + fmtTime(m.ts);
+
+        const li = el("li", "msg" + (m.emp === state.meKey ? " mine" : ""));
+        li.append(avatarEl(sender, m.name || m.emp));
+
+        const bubble = el("div", "bubble");
+        const head = el("div", "msg-head");
+        head.append(el("strong", "", m.name || m.emp), document.createTextNode(" · " + when));
+        bubble.append(head, el("div", "msg-text", m.text));
+
+        li.append(bubble);
+        list.append(li);
+    }
+
+    if (wasAtBottom) scrollChat();
+}
+
+async function sendChat(event) {
+    event.preventDefault();
+    const text = $("chatIn").value.trim();
+    if (!text || !state.meKey) return;
+
+    $("chatIn").value = "";
+    try {
+        await Store.sendChat({ emp: state.meKey, name: state.meName, text: text, ts: Date.now() });
+        scrollChat();
+    } catch (e) {
+        $("chatIn").value = text;
+        toast("Nachricht konnte nicht gesendet werden.", true);
+    }
+}
+
+async function clearChat() {
+    if (!confirm("Wirklich den gesamten Chat löschen?")) return;
+    try { await Store.clearChat(); } catch (e) { toast("Löschen hat nicht geklappt.", true); }
+}
+
+tabHooks.chat = scrollChat;
+extraRenderers.push(renderChat);
+
 /* ---------- Start ---------- */
 async function init() {
     for (const task of TASKS) {
@@ -493,14 +981,41 @@ async function init() {
     $("logoutBtn").addEventListener("click", logout);
     $("stampBtn").addEventListener("click", handleStamp);
     $("exportBtn").addEventListener("click", exportCsv);
+    $("pauseBtn").addEventListener("click", handlePause);
+    $("tabs").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-tab]");
+        if (b) showTab(b.dataset.tab);
+    });
+    $("rankRange").addEventListener("change", renderRanking);
+    $("profileForm").addEventListener("submit", saveProfile);
+    $("vacationForm").addEventListener("submit", submitVacation);
+    $("meetingForm").addEventListener("submit", submitMeeting);
+    $("calPrev").addEventListener("click", () => shiftMonth(-1));
+    $("calNext").addEventListener("click", () => shiftMonth(1));
+    $("calToday").addEventListener("click", () => {
+        const n = new Date();
+        state.cal = { y: n.getFullYear(), m: n.getMonth() };
+        renderCalendar();
+    });
+    $("calGrid").addEventListener("click", (e) => {
+        const cell = e.target.closest("[data-date]");
+        if (!cell) return;
+        $("mtDate").value = cell.dataset.date;
+        toast("Datum übernommen: " + fmtDateStr(cell.dataset.date));
+    });
+    $("chatForm").addEventListener("submit", sendChat);
+    $("chatClear").addEventListener("click", clearChat);
 
-    Store.listeners.push((employees, shifts) => {
-        state.employees = employees;
-        state.shifts = shifts;
+    Store.listeners.push((d) => {
+        state.employees = d.employees;
+        state.shifts = [...d.shifts].sort((a, b) => b.start - a.start);
+        state.vacations = d.vacations;
+        state.meetings = d.meetings;
+        state.chat = d.chat;
         render();
     });
 
-    setInterval(updateTimes, 1000);
+    setInterval(() => { updateTimes(); checkAutoStop(); }, 1000);
 
     /* Auf die ersten Daten warten, dann automatisch anmelden */
     await Store.start();
