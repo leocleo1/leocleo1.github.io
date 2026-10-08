@@ -1,10 +1,50 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
     <meta charset="UTF-8">
-    <title>Twitchkiste</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Twitchkiste Zeiterfassung</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <main id="loginView">
+        <form id="loginForm">
+            <h1>Twitchkiste</h1>
+            <h2>Mitarbeiter-Login</h2>
 
+            <label for="nameIn">Name</label>
+            <input id="nameIn" type="text" required>
+
+            <label for="pinIN">Passwort</label>
+            <input id="pinIN" type="password" required>
+
+            <button type="submit">Login</button>
+        </form>
+    </main>
+
+    <main id="appView" hidden>
+        <h1 id="hello"></h1>
+        <div id="timer">00:00:00</div>
+
+        <label for="taskSel">Tätigkeit</label>
+        <select id="taskSel">
+            <option>Clips schneiden</option>
+            <option>Twitch Stream sichten</option>
+            <option>TikTok hochladen</option>
+            <option>Auf Inspiration warten</option>
+            <option>Goonen</option>
+            <option>Arbeitszeitbetrug</option>
+        </select>
+
+        <button id="stampBtn" type="button">Einstempeln</button>
+
+        <table>
+            <thead>
+                <tr><th>Tag</th><th>Von</th><th>Bis</th><th>Dauer</th><th>Tätigkeit</th></tr>
+            </thead>
+            <tbody id="rows"></tbody>
+        </table>
+    </main>
+    <script src="script.js"></script>
 </body>
 </html>
