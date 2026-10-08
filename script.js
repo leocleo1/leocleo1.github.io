@@ -51,6 +51,7 @@ const SLOT_USERS = ["lip","leo"];
 const SLOT_START = 100;        // Startguthaben in Coins
 const COINS_PER_MIN = 1;       // Coins pro gearbeiteter Minute
 const SLOT_BETS = [5, 10, 25, 50, 67, 100];
+const PAIR_MULT = 1.2;   // Zwei gleiche zahlen Einsatz × diesen Faktor
 
 /* weight = Häufigkeit, pay = Gewinn-Multiplikator bei drei gleichen Symbolen */
 const SLOT_SYMBOLS = [
@@ -1157,7 +1158,7 @@ const randomSym = () => SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.len
 function evalSpin(result, bet) {
     const [a, b, c] = result.map((r) => r.sym);
     if (a === b && b === c) return { win: bet * result[0].pay, kind: "triple", sym: a };
-    if (a === b || b === c || a === c) return { win: bet, kind: "pair" };
+    if (a === b || b === c || a === c) return { win: Math.round(bet * PAIR_MULT), kind: "pair" };
     return { win: 0, kind: "none" };
 }
 
@@ -1199,7 +1200,7 @@ function buildCasinoUi() {
         table.append(row);
     }
     const pair = el("div", "pay-row");
-    pair.append(el("span", "", "Zwei gleiche"), el("strong", "", "Einsatz zurück"));
+    pair.append(el("span", "", "Zwei gleiche"), el("strong", "mono", "× " + PAIR_MULT));
     table.append(pair);
 }
 
@@ -1288,7 +1289,9 @@ async function spin() {
     } else if (outcome.kind === "triple") {
         message = "Dreimal " + outcome.sym + "! +" + outcome.win + " Coins";
     } else if (outcome.kind === "pair") {
-        message = "Zwei gleiche. Einsatz zurück.";
+        message = PAIR_MULT > 1
+            ? "Zwei gleiche! +" + (outcome.win - bet) + " Coins"
+            : "Zwei gleiche. Einsatz zurück.";
     } else {
         message = LOSE_TEXTS[Math.floor(Math.random() * LOSE_TEXTS.length)];
     }
