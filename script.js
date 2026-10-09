@@ -47,7 +47,7 @@ const MONTHS = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli",
     "August", "September", "Oktober", "November", "Dezember"];
 
 /* Wer den Casino-Tab sieht. Eintrag = ID des Namens (kleingeschrieben, ohne Umlaute, Leerzeichen -> "-"). */
-const SLOT_USERS = ["lip","leo"];
+const SLOT_USERS = ["lip","leo", "arved"];
 const SLOT_START = 100;        // Startguthaben in Coins
 const COINS_PER_MIN = 1;       // Coins pro gearbeiteter Minute
 const SLOT_BETS = [5, 10, 25, 50, 67, 100];
